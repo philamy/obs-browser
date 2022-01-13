@@ -508,18 +508,18 @@ void RegisterBrowserSource()
 		static_cast<BrowserSource *>(data)->SendKeyClick(event, key_up);
 	};
 	info.show = [](void *data) {
-		static_cast<BrowserSource *>(data)->SetShowing(true);
 	};
 	info.hide = [](void *data) {
-		static_cast<BrowserSource *>(data)->SetShowing(false);
 	};
 	info.activate = [](void *data) {
+	    static_cast<BrowserSource *>(data)->SetShowing(true);
 		BrowserSource *bs = static_cast<BrowserSource *>(data);
 		if (bs->restart)
 			bs->Refresh();
 		bs->SetActive(true);
 	};
 	info.deactivate = [](void *data) {
+	    static_cast<BrowserSource *>(data)->SetShowing(false);
 		static_cast<BrowserSource *>(data)->SetActive(false);
 	};
 
