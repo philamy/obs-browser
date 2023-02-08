@@ -20,7 +20,7 @@
 
 #ifdef _MSC_VER
 #pragma warning(push)
-#pragma warning(disable : 4100)
+#pragma warning(disable : 4100 4996)
 #else
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
@@ -37,7 +37,7 @@
 #include <include/cef_render_process_handler.h>
 #include <include/cef_request_context_handler.h>
 #include <include/cef_jsdialog_handler.h>
-#if defined(__APPLE__) && !defined(BROWSER_LEGACY)
+#if defined(__APPLE__)
 #include "include/wrapper/cef_library_loader.h"
 #endif
 

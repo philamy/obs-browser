@@ -84,9 +84,10 @@ CefRefPtr<CefResourceRequestHandler> BrowserClient::GetResourceRequestHandler(
 	return nullptr;
 }
 
-CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(
-	CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>,
-	CefRefPtr<CefCallback>)
+CefResourceRequestHandler::ReturnValue
+BrowserClient::OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+				    CefRefPtr<CefRequest>,
+				    CefRefPtr<CefCallback>)
 {
 	return RV_CONTINUE;
 }
@@ -153,7 +154,7 @@ bool BrowserClient::OnProcessMessageReceived(
 		} else if (name == "setCurrentScene") {
 			const std::string scene_name =
 				input_args->GetString(1).ToString();
-			obs_source_t *source =
+			OBSSourceAutoRelease source =
 				obs_get_source_by_name(scene_name.c_str());
 			if (!source) {
 				blog(LOG_WARNING,
@@ -165,10 +166,8 @@ bool BrowserClient::OnProcessMessageReceived(
 				     "Browser source '%s' tried to switch to '%s' which isn't a scene",
 				     obs_source_get_name(bs->source),
 				     scene_name.c_str());
-				obs_source_release(source);
 			} else {
 				obs_frontend_set_current_scene(source);
-				obs_source_release(source);
 			}
 		} else if (name == "setCurrentTransition") {
 			const std::string transition_name =
@@ -176,7 +175,7 @@ bool BrowserClient::OnProcessMessageReceived(
 			obs_frontend_source_list transitions = {};
 			obs_frontend_get_transitions(&transitions);
 
-			obs_source_t *transition = nullptr;
+			OBSSourceAutoRelease transition;
 			for (size_t i = 0; i < transitions.sources.num; i++) {
 				obs_source_t *source =
 					transitions.sources.array[i];
@@ -189,15 +188,13 @@ bool BrowserClient::OnProcessMessageReceived(
 
 			obs_frontend_source_list_free(&transitions);
 
-			if (transition) {
+			if (transition)
 				obs_frontend_set_current_transition(transition);
-				obs_source_release(transition);
-			} else {
+			else
 				blog(LOG_WARNING,
 				     "Browser source '%s' tried to change the current transition to '%s' which doesn't exist",
 				     obs_source_get_name(bs->source),
 				     transition_name.c_str());
-			}
 		}
 		[[fallthrough]];
 	case ControlLevel::Basic:
@@ -218,9 +215,8 @@ bool BrowserClient::OnProcessMessageReceived(
 			json = scenes_vector;
 			obs_frontend_source_list_free(&list);
 		} else if (name == "getCurrentScene") {
-			OBSSource current_scene =
+			OBSSourceAutoRelease current_scene =
 				obs_frontend_get_current_scene();
-			obs_source_release(current_scene);
 
 			if (!current_scene)
 				return false;
@@ -247,10 +243,9 @@ bool BrowserClient::OnProcessMessageReceived(
 			json = transitions_vector;
 			obs_frontend_source_list_free(&list);
 		} else if (name == "getCurrentTransition") {
-			obs_source_t *source =
+			OBSSourceAutoRelease source =
 				obs_frontend_get_current_transition();
 			json = obs_source_get_name(source);
-			obs_source_release(source);
 		}
 		[[fallthrough]];
 	case ControlLevel::ReadObs:
@@ -319,7 +314,7 @@ void BrowserClient::OnPaint(CefRefPtr<CefBrowser>, PaintElementType type,
 		return;
 	}
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 	if (sharing_available) {
 		return;
 	}
@@ -351,7 +346,41 @@ void BrowserClient::OnPaint(CefRefPtr<CefBrowser>, PaintElementType type,
 	}
 }
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
+void BrowserClient::UpdateExtraTexture()
+{
+	if (bs->texture) {
+		const uint32_t cx = gs_texture_get_width(bs->texture);
+		const uint32_t cy = gs_texture_get_height(bs->texture);
+		const gs_color_format format =
+			gs_texture_get_color_format(bs->texture);
+		const gs_color_format linear_format =
+			gs_generalize_format(format);
+
+		if (linear_format != format) {
+			if (!bs->extra_texture ||
+			    bs->last_format != linear_format ||
+			    bs->last_cx != cx || bs->last_cy != cy) {
+				if (bs->extra_texture) {
+					gs_texture_destroy(bs->extra_texture);
+					bs->extra_texture = nullptr;
+				}
+				bs->extra_texture = gs_texture_create(
+					cx, cy, linear_format, 1, nullptr, 0);
+				bs->last_cx = cx;
+				bs->last_cy = cy;
+				bs->last_format = linear_format;
+			}
+		} else if (bs->extra_texture) {
+			gs_texture_destroy(bs->extra_texture);
+			bs->extra_texture = nullptr;
+			bs->last_cx = 0;
+			bs->last_cy = 0;
+			bs->last_format = GS_UNKNOWN;
+		}
+	}
+}
+
 void BrowserClient::OnAcceleratedPaint(CefRefPtr<CefBrowser>,
 				       PaintElementType type, const RectList &,
 				       void *shared_handle)
@@ -366,24 +395,17 @@ void BrowserClient::OnAcceleratedPaint(CefRefPtr<CefBrowser>,
 	}
 
 #ifndef _WIN32
-	if (shared_handle == last_handle)
+	if (shared_handle == bs->last_handle)
 		return;
 #endif
 
 	obs_enter_graphics();
 
 	if (bs->texture) {
-		if (bs->extra_texture) {
-			gs_texture_destroy(bs->extra_texture);
-			bs->extra_texture = nullptr;
-		}
 #ifdef _WIN32
-		gs_texture_release_sync(bs->texture, 0);
+		//gs_texture_release_sync(bs->texture, 0);
 #endif
 		gs_texture_destroy(bs->texture);
-#ifdef _WIN32
-		CloseHandle(extra_handle);
-#endif
 		bs->texture = nullptr;
 	}
 
@@ -391,34 +413,61 @@ void BrowserClient::OnAcceleratedPaint(CefRefPtr<CefBrowser>,
 	bs->texture = gs_texture_create_from_iosurface(
 		(IOSurfaceRef)(uintptr_t)shared_handle);
 #elif defined(_WIN32) && CHROME_VERSION_BUILD > 4183
-	DuplicateHandle(GetCurrentProcess(), (HANDLE)(uintptr_t)shared_handle,
-			GetCurrentProcess(), &extra_handle, 0, false,
-			DUPLICATE_SAME_ACCESS);
-
 	bs->texture =
 		gs_texture_open_nt_shared((uint32_t)(uintptr_t)shared_handle);
-	gs_texture_acquire_sync(bs->texture, 1, INFINITE);
+	//if (bs->texture)
+	//	gs_texture_acquire_sync(bs->texture, 1, INFINITE);
+
 #else
 	bs->texture =
 		gs_texture_open_shared((uint32_t)(uintptr_t)shared_handle);
 #endif
-
-	if (bs->texture) {
-		const uint32_t cx = gs_texture_get_width(bs->texture);
-		const uint32_t cy = gs_texture_get_height(bs->texture);
-		const gs_color_format format =
-			gs_texture_get_color_format(bs->texture);
-		const gs_color_format linear_format =
-			gs_generalize_format(format);
-		if (linear_format != format) {
-			bs->extra_texture = gs_texture_create(
-				cx, cy, linear_format, 1, nullptr, 0);
-		}
-	}
+	UpdateExtraTexture();
 	obs_leave_graphics();
 
-	last_handle = shared_handle;
+	bs->last_handle = shared_handle;
 }
+
+#ifdef CEF_ON_ACCELERATED_PAINT2
+void BrowserClient::OnAcceleratedPaint2(CefRefPtr<CefBrowser>,
+					PaintElementType type, const RectList &,
+					void *shared_handle, bool new_texture)
+{
+	if (type != PET_VIEW) {
+		// TODO Overlay texture on top of bs->texture
+		return;
+	}
+
+	if (!valid()) {
+		return;
+	}
+
+	if (!new_texture) {
+		return;
+	}
+
+	obs_enter_graphics();
+
+	if (bs->texture) {
+		gs_texture_destroy(bs->texture);
+		bs->texture = nullptr;
+	}
+
+#if defined(__APPLE__) && CHROME_VERSION_BUILD > 4183
+	bs->texture = gs_texture_create_from_iosurface(
+		(IOSurfaceRef)(uintptr_t)shared_handle);
+#elif defined(_WIN32) && CHROME_VERSION_BUILD > 4183
+	bs->texture =
+		gs_texture_open_nt_shared((uint32_t)(uintptr_t)shared_handle);
+
+#else
+	bs->texture =
+		gs_texture_open_shared((uint32_t)(uintptr_t)shared_handle);
+#endif
+	UpdateExtraTexture();
+	obs_leave_graphics();
+}
+#endif
 #endif
 
 static speaker_layout GetSpeakerLayout(CefAudioHandler::ChannelLayout cefLayout)
@@ -540,7 +589,6 @@ void BrowserClient::OnAudioStreamStarted(CefRefPtr<CefBrowser> browser, int id,
 	if (!stream.source) {
 		stream.source = obs_source_create_private("audio_line", nullptr,
 							  nullptr);
-		obs_source_release(stream.source);
 
 		obs_source_add_active_child(bs->source, stream.source);
 
@@ -633,18 +681,26 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser>,
 				     const CefString &source, int line)
 {
 	int errorLevel = LOG_INFO;
+	const char *code = "Info";
 	switch (level) {
 	case LOGSEVERITY_ERROR:
 		errorLevel = LOG_WARNING;
+		code = "Error";
 		break;
 	case LOGSEVERITY_FATAL:
 		errorLevel = LOG_ERROR;
+		code = "Fatal";
 		break;
 	default:
 		return false;
 	}
 
-	blog(errorLevel, "obs-browser: %s (source: %s:%d)",
+	const char *sourceName = "<unknown>";
+
+	if (bs && bs->source)
+		sourceName = obs_source_get_name(bs->source);
+
+	blog(errorLevel, "[obs-browser: '%s'] %s: %s (%s:%d)", sourceName, code,
 	     message.ToString().c_str(), source.ToString().c_str(), line);
 	return false;
 }

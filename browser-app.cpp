@@ -24,17 +24,19 @@
 #include <windows.h>
 #endif
 
-#ifdef USE_QT_LOOP
+#ifdef ENABLE_BROWSER_QT_LOOP
 #include <util/base.h>
 #include <util/platform.h>
 #include <util/threading.h>
 #include <QTimer>
 #endif
 
+#ifndef UNUSED_PARAMETER
 #define UNUSED_PARAMETER(x) \
 	{                   \
 		(void)x;    \
 	}
+#endif
 
 using namespace json11;
 
@@ -405,7 +407,7 @@ bool BrowserApp::Execute(const CefString &name, CefRefPtr<CefV8Value>,
 	return true;
 }
 
-#ifdef USE_QT_LOOP
+#ifdef ENABLE_BROWSER_QT_LOOP
 Q_DECLARE_METATYPE(MessageTask);
 MessageObject messageObject;
 

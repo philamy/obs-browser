@@ -12,6 +12,7 @@ class QCefBrowserClient : public CefClient,
 			  public CefContextMenuHandler,
 			  public CefLoadHandler,
 			  public CefKeyboardHandler,
+			  public CefFocusHandler,
 			  public CefJSDialogHandler {
 
 public:
@@ -30,6 +31,7 @@ public:
 	virtual CefRefPtr<CefRequestHandler> GetRequestHandler() override;
 	virtual CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override;
 	virtual CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override;
+	virtual CefRefPtr<CefFocusHandler> GetFocusHandler() override;
 	virtual CefRefPtr<CefContextMenuHandler>
 	GetContextMenuHandler() override;
 	virtual CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override;
@@ -68,6 +70,10 @@ public:
 		CefRefPtr<CefDictionaryValue> &extra_info,
 		bool *no_javascript_access) override;
 
+	/* CefFocusHandler */
+	virtual bool OnSetFocus(CefRefPtr<CefBrowser> browser,
+				CefFocusHandler::FocusSource source) override;
+
 	/* CefContextMenuHandler */
 	virtual void
 	OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
@@ -82,6 +88,11 @@ public:
 		       CefRefPtr<CefMenuModel> model,
 		       CefRefPtr<CefRunContextMenuCallback> callback) override;
 #endif
+
+	virtual bool OnContextMenuCommand(
+		CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+		CefRefPtr<CefContextMenuParams> params, int command_id,
+		CefContextMenuHandler::EventFlags event_flags) override;
 
 	/* CefLoadHandler */
 	virtual void OnLoadEnd(CefRefPtr<CefBrowser> browser,

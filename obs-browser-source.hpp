@@ -34,7 +34,7 @@
 #include <vector>
 
 struct AudioStream {
-	OBSSource source;
+	OBSSourceAutoRelease source;
 	speaker_layout speakers;
 	int channels;
 	int sample_rate;
@@ -68,6 +68,18 @@ struct BrowserSource {
 	std::string css;
 	gs_texture_t *texture = nullptr;
 	gs_texture_t *extra_texture = nullptr;
+	uint32_t last_cx = 0;
+	uint32_t last_cy = 0;
+	gs_color_format last_format = GS_UNKNOWN;
+
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
+#ifdef _WIN32
+	void *last_handle = INVALID_HANDLE_VALUE;
+#elif defined(__APPLE__)
+	void *last_handle = nullptr;
+#endif
+#endif
+
 	int width = 0;
 	int height = 0;
 	bool fps_custom = false;
@@ -81,7 +93,7 @@ struct BrowserSource {
 	std::atomic<bool> destroying = false;
 	ControlLevel webpage_control_level = DEFAULT_CONTROL_LEVEL;
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED) && \
-	defined(SHARED_TEXTURE_SUPPORT_ENABLED)
+	defined(ENABLE_BROWSER_SHARED_TEXTURE)
 	bool reset_frame = false;
 #endif
 	bool is_showing = false;
@@ -92,6 +104,9 @@ struct BrowserSource {
 		if (extra_texture) {
 			gs_texture_destroy(extra_texture);
 			extra_texture = nullptr;
+			last_cx = 0;
+			last_cy = 0;
+			last_format = GS_UNKNOWN;
 		}
 		if (texture) {
 			gs_texture_destroy(texture);
@@ -138,7 +153,7 @@ struct BrowserSource {
 	void Refresh();
 
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED) && \
-	defined(SHARED_TEXTURE_SUPPORT_ENABLED)
+	defined(ENABLE_BROWSER_SHARED_TEXTURE)
 	inline void SignalBeginFrame();
 #endif
 

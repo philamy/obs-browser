@@ -38,19 +38,13 @@ class BrowserClient : public CefClient,
 		      public CefAudioHandler,
 		      public CefLoadHandler {
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
-#ifdef _WIN32
-	void *last_handle = INVALID_HANDLE_VALUE;
-	void *extra_handle = INVALID_HANDLE_VALUE;
-#elif defined(__APPLE__)
-	void *last_handle = nullptr;
-#endif
-#endif
 	bool sharing_available = false;
 	bool reroute_audio = true;
 	ControlLevel webpage_control_level = DEFAULT_CONTROL_LEVEL;
 
 	inline bool valid() const;
+
+	void UpdateExtraTexture();
 
 public:
 	BrowserSource *bs;
@@ -141,11 +135,18 @@ public:
 			     PaintElementType type, const RectList &dirtyRects,
 			     const void *buffer, int width,
 			     int height) override;
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 	virtual void OnAcceleratedPaint(CefRefPtr<CefBrowser> browser,
 					PaintElementType type,
 					const RectList &dirtyRects,
 					void *shared_handle) override;
+#ifdef CEF_ON_ACCELERATED_PAINT2
+	virtual void OnAcceleratedPaint2(CefRefPtr<CefBrowser> browser,
+					 PaintElementType type,
+					 const RectList &dirtyRects,
+					 void *shared_handle,
+					 bool new_texture) override;
+#endif
 #endif
 #if CHROME_VERSION_BUILD >= 4103
 	virtual void OnAudioStreamPacket(CefRefPtr<CefBrowser> browser,

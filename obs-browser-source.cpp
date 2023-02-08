@@ -32,7 +32,7 @@
 #include "linux-keyboard-helpers.hpp"
 #endif
 
-#ifdef USE_QT_LOOP
+#ifdef ENABLE_BROWSER_QT_LOOP
 #include <QEventLoop>
 #include <QThread>
 #endif
@@ -52,6 +52,7 @@ static void SendBrowserVisibility(CefRefPtr<CefBrowser> browser, bool isVisible)
 
 #if ENABLE_WASHIDDEN
 	if (isVisible) {
+		browser->GetHost()->WasResized();
 		browser->GetHost()->WasHidden(false);
 		browser->GetHost()->Invalidate(PET_VIEW);
 	} else {
@@ -136,7 +137,7 @@ void BrowserSource::Destroy()
 void BrowserSource::ExecuteOnBrowser(BrowserFunc func, bool async)
 {
 	if (!async) {
-#ifdef USE_QT_LOOP
+#ifdef ENABLE_BROWSER_QT_LOOP
 		if (QThread::currentThread() == qApp->thread()) {
 			if (!!cefBrowser)
 				func(cefBrowser);
@@ -157,7 +158,7 @@ void BrowserSource::ExecuteOnBrowser(BrowserFunc func, bool async)
 	} else {
 		CefRefPtr<CefBrowser> browser = GetBrowser();
 		if (!!browser) {
-#ifdef USE_QT_LOOP
+#ifdef ENABLE_BROWSER_QT_LOOP
 			QueueBrowserTask(cefBrowser, func);
 #else
 			QueueCEFTask([=]() { func(browser); });
@@ -169,7 +170,7 @@ void BrowserSource::ExecuteOnBrowser(BrowserFunc func, bool async)
 bool BrowserSource::CreateBrowser()
 {
 	return QueueCEFTask([this]() {
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 		if (hwaccel) {
 			obs_enter_graphics();
 			tex_sharing_avail = gs_shared_texture_available();
@@ -193,13 +194,13 @@ bool BrowserSource::CreateBrowser()
 #endif
 		windowInfo.windowless_rendering_enabled = true;
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 		windowInfo.shared_texture_enabled = hwaccel;
 #endif
 
 		CefBrowserSettings cefBrowserSettings;
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 #ifdef BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED
 		if (!fps_custom) {
 			windowInfo.external_begin_frame_enabled = true;
@@ -413,13 +414,24 @@ void BrowserSource::SetShowing(bool showing)
 		Json json = Json::object{{"visible", showing}};
 		DispatchJSEvent("obsSourceVisibleChanged", json.dump(), this);
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED) && \
-	defined(SHARED_TEXTURE_SUPPORT_ENABLED)
+	defined(ENABLE_BROWSER_SHARED_TEXTURE)
 		if (showing && !fps_custom) {
 			reset_frame = false;
 		}
 #endif
 
 		SendBrowserVisibility(cefBrowser, showing);
+
+		if (showing)
+			return;
+
+		obs_enter_graphics();
+
+		if (!hwaccel && texture) {
+			DestroyTextures();
+		}
+
+		obs_leave_graphics();
 	}
 }
 
@@ -460,7 +472,7 @@ CefRefPtr<CefBrowser> BrowserSource::GetBrowser()
 	return cefBrowser;
 }
 
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 #ifdef BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED
 inline void BrowserSource::SignalBeginFrame()
 {
@@ -547,12 +559,30 @@ void BrowserSource::Update(obs_data_t *settings)
 		}
 #endif
 
-		if (n_is_local == is_local && n_width == width &&
-		    n_height == height && n_fps_custom == fps_custom &&
+		if (n_is_local == is_local && n_fps_custom == fps_custom &&
 		    n_fps == fps && n_shutdown == shutdown_on_invisible &&
 		    n_restart == restart && n_css == css && n_url == url &&
 		    n_reroute == reroute_audio &&
 		    n_webpage_control_level == webpage_control_level) {
+
+			if (n_width == width && n_height == height)
+				return;
+
+			width = n_width;
+			height = n_height;
+			ExecuteOnBrowser(
+				[=](CefRefPtr<CefBrowser> cefBrowser) {
+					const CefSize cefSize(width, height);
+					cefBrowser->GetHost()
+						->GetClient()
+						->GetDisplayHandler()
+						->OnAutoResize(cefBrowser,
+							       cefSize);
+					cefBrowser->GetHost()->WasResized();
+					cefBrowser->GetHost()->Invalidate(
+						PET_VIEW);
+				},
+				true);
 			return;
 		}
 
@@ -586,7 +616,7 @@ void BrowserSource::Tick()
 {
 	if (create_browser && CreateBrowser())
 		create_browser = false;
-#if defined(SHARED_TEXTURE_SUPPORT_ENABLED)
+#if defined(ENABLE_BROWSER_SHARED_TEXTURE)
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED)
 	if (!fps_custom)
 		reset_frame = true;
@@ -611,7 +641,7 @@ extern void ProcessCef();
 void BrowserSource::Render()
 {
 	bool flip = false;
-#ifdef SHARED_TEXTURE_SUPPORT_ENABLED
+#ifdef ENABLE_BROWSER_SHARED_TEXTURE
 	flip = hwaccel;
 #endif
 
@@ -662,9 +692,9 @@ void BrowserSource::Render()
 	}
 
 #if defined(BROWSER_EXTERNAL_BEGIN_FRAME_ENABLED) && \
-	defined(SHARED_TEXTURE_SUPPORT_ENABLED)
+	defined(ENABLE_BROWSER_SHARED_TEXTURE)
 	SignalBeginFrame();
-#elif USE_QT_LOOP
+#elif defined(ENABLE_BROWSER_QT_LOOP)
 	ProcessCef();
 #endif
 }
